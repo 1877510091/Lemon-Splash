@@ -1,7 +1,6 @@
 name: danci
 description: "A new Flutter project."
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -11,10 +10,12 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  # ✅ 新增：数据库相关插件
+  
+  # ✅ 核心三件套 (这次只加这几个，稳！)
   sqflite: ^2.3.0
   path: ^1.9.0
   path_provider: ^2.1.2
+  intl: ^0.19.0          # 新增：用于处理日期
 
 dev_dependencies:
   flutter_test:
@@ -24,15 +25,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  
-  # ✅ 注册资源文件
   assets:
     - assets/bg.jpg
-    - assets/data/   # 这一行让APP能读取 data 文件夹下的所有 json
-
-# 图标配置
-flutter_launcher_icons:
-  android: "ic_launcher"
-  ios: true
-  image_path: "assets/icon/icon.png" 
-  min_sdk_android: 21
+    - assets/data/       # 确保你的 json 文件都在这里
