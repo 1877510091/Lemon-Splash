@@ -1,11 +1,10 @@
-// ✅ 修复：删除了未使用的 import 'dart:convert';
 class Word {
   final int? id;
-  final String word;       // 单词拼写
-  final String phonetic;   // 音标
-  final String definition; // 中文释义
-  final String bookName;   // 所属书名
-  int status;              // 0:未学, 1:认识, 2:忘记
+  final String word;
+  final String phonetic;
+  final String definition;
+  final String bookName;
+  int status; // 0:未学, 1:认识, 2:忘记
 
   Word({
     this.id,
@@ -16,7 +15,6 @@ class Word {
     this.status = 0,
   });
 
-  // 1. 数据库 -> 对象
   factory Word.fromMap(Map<String, dynamic> map) {
     return Word(
       id: map['id'],
@@ -28,7 +26,6 @@ class Word {
     );
   }
 
-  // 2. 对象 -> 数据库
   Map<String, dynamic> toMap() {
     return {
       'word': word,
@@ -39,30 +36,65 @@ class Word {
     };
   }
 
-  // 3. 【核心】解析你的 JSON 文件格式
+  // ✅ 万能适配器
   factory Word.fromJson(Map<String, dynamic> json, String bookName) {
-    // 你的JSON里翻译在 'translations' 数组里，我们需要把它拼成一个字符串
+    if (json.containsKey('headWord') && json.containsKey('content')) {
+      try {
+        var contentObj = json['content'];
+        var wordObj = contentObj['word'];
+        var coreContent = wordObj['content'];
+        String w = wordObj['wordHead'] ?? json['headWord'] ?? '';
+        String p = coreContent['usphone'] ?? coreContent['ukphone'] ?? coreContent['phone'] ?? '';
+        String def = "";
+        if (coreContent['trans'] != null) {
+          List<dynamic> transList = coreContent['trans'];
+          def = transList.map((t) {
+            String pos = t['pos'] ?? '';
+            String cn = t['tranCn'] ?? '';
+            if (pos.endsWith('.')) pos = pos.substring(0, pos.length - 1);
+            return "$pos. $cn";
+          }).join('\n');
+        }
+        return Word(word: w, phonetic: p, definition: def, bookName: bookName, status: 0);
+      } catch (e) {
+        return Word(word: "Error", phonetic: "", definition: "解析失败", bookName: bookName);
+      }
+    }
     String defStr = "";
-    // ✅ 修复：给 if 语句添加花括号
     if (json['translations'] != null) {
       List<dynamic> transList = json['translations'];
-      // 拼接成 "n. 放弃; v. 抛弃" 的形式
       defStr = transList.map((t) {
         String type = t['type'] ?? '';
         String trans = t['translation'] ?? '';
         return "$type. $trans";
       }).join('\n');
     }
-    
-    // 你的JSON可能没有 'phonetic' 字段，这里做一个防空处理
-    String phone = json['phonetic'] ?? ''; 
+    if (defStr.isEmpty && json['definition'] != null) defStr = json['definition'];
+    return Word(word: json['word'] ?? '', phonetic: json['phonetic'] ?? '', definition: defStr, bookName: bookName, status: 0);
+  }
+}
 
-    return Word(
-      word: json['word'] ?? '', 
-      phonetic: phone,
-      definition: defStr,
-      bookName: bookName,
-      status: 0,
+// ✅ 新增：学习进度类 (解决 main.dart 报错的关键)
+class StudyProgress {
+  final String bookName;
+  int currentGroup;
+  DateTime? lastReviewTime;
+
+  StudyProgress({required this.bookName, required this.currentGroup, this.lastReviewTime});
+
+  Map<String, dynamic> toMap() {
+    return {
+      'bookName': bookName,
+      'currentGroup': currentGroup,
+      'lastReviewTime': lastReviewTime?.toIso8601String(),
+    };
+  }
+
+  factory StudyProgress.fromMap(Map<String, dynamic> map) {
+    return StudyProgress(
+      bookName: map['bookName'],
+      currentGroup: map['currentGroup'],
+      lastReviewTime: map['lastReviewTime'] != null ? DateTime.parse(map['lastReviewTime']) : null,
     );
   }
 }

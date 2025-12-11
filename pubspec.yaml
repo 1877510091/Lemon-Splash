@@ -11,11 +11,12 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   
-  # ✅ 核心三件套 (这次只加这几个，稳！)
+  # ✅ 核心依赖
   sqflite: ^2.3.0
   path: ^1.9.0
   path_provider: ^2.1.2
-  intl: ^0.19.0          # 新增：用于处理日期
+  intl: ^0.19.0
+  fl_chart: ^0.68.0      # 👈 必须是这个版本或更新
 
 dev_dependencies:
   flutter_test:
@@ -27,4 +28,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/bg.jpg
-    - assets/data/       # 确保你的 json 文件都在这里
+    - assets/data/

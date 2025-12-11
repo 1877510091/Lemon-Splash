@@ -2,10 +2,10 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'package:flutter/foundation.dart'; // 必须引用，用于使用 compute 和 debugPrint
+import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart'; 
 import 'word_model.dart';
 
-// ✅ 顶级函数：在后台线程解析 JSON，避免占用主线程
 List<dynamic> _parseJson(String jsonString) {
   return json.decode(jsonString);
 }
@@ -13,20 +13,19 @@ List<dynamic> _parseJson(String jsonString) {
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
-  bool _isImporting = false; // 🔒 锁：防止用户疯狂点击重复导入
+  bool _isImporting = false; 
 
   DatabaseHelper._init();
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('lemon_words.db');
+    _database = await _initDB('lemon_words_v2.db'); // 升级数据库名
     return _database!;
   }
 
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
-
     return await openDatabase(path, version: 1, onCreate: _createDB);
   }
 
@@ -34,102 +33,113 @@ class DatabaseHelper {
     await db.execute('''
     CREATE TABLE words (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      word TEXT,
-      phonetic TEXT,
-      definition TEXT,
-      bookName TEXT,
-      status INTEGER DEFAULT 0
-    )
-    ''');
-    // ✅ 创建索引，加快查询速度
+      word TEXT, phonetic TEXT, definition TEXT, bookName TEXT, status INTEGER DEFAULT 0
+    )''');
     await db.execute('CREATE INDEX idx_bookName ON words(bookName)');
-  }
-
-  // 检查某本书是否已经导入过
-  Future<bool> isBookImported(String bookName) async {
-    final db = await instance.database;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM words WHERE bookName = ?',
-      [bookName]
-    );
-    int count = Sqflite.firstIntValue(result) ?? 0;
-    return count > 0;
-  }
-
-  // ✅ 核心优化：分批导入数据，防止卡死
-  Future<void> importJsonData(String jsonFileName, String bookName) async {
-    if (_isImporting) {
-      debugPrint("⚠️ 正在导入中，请勿重复操作");
-      return;
-    }
-    _isImporting = true;
-
-    final db = await instance.database;
-
-    // 1. 检查是否已存在
-    if (await isBookImported(bookName)) {
-      debugPrint("📚 $bookName 之前已导入，跳过。");
-      _isImporting = false;
-      return;
-    }
-
-    debugPrint("🚀 开始读取文件: $bookName ...");
+    await db.execute('CREATE INDEX idx_status ON words(status)'); 
     
+    // ✅ 新增：学习日志表
+    await db.execute('CREATE TABLE study_logs (date TEXT PRIMARY KEY, count INTEGER DEFAULT 0)');
+    // ✅ 新增：进度表
+    await db.execute('CREATE TABLE study_progress (bookName TEXT PRIMARY KEY, currentGroup INTEGER DEFAULT 0, lastReviewTime TEXT)');
+  }
+
+  Future<void> importJsonData(String jsonFileName, String bookName) async {
+    if (_isImporting) return;
+    _isImporting = true;
+    final db = await instance.database;
+    final check = await db.rawQuery('SELECT count(*) as count FROM words WHERE bookName = ? LIMIT 1', [bookName]);
+    if ((Sqflite.firstIntValue(check) ?? 0) > 0) {
+      _isImporting = false; return; 
+    }
     try {
-      // 2. 读取文件
       String jsonString = await rootBundle.loadString('assets/data/$jsonFileName');
-
-      // 3. 后台线程解析 JSON
       final List<dynamic> jsonList = await compute(_parseJson, jsonString);
-      debugPrint("📄 解析完成，共 ${jsonList.length} 个单词，准备分批写入...");
-
-      // 4. ✅【关键优化】分批写入，每批 100 个
-      // 如果一次性写入 5000 个，界面必卡死。分批写可以让 UI 线程有机会刷新。
-      const int batchSize = 100; 
-      
+      const int batchSize = 500; 
       for (var i = 0; i < jsonList.length; i += batchSize) {
-        // 计算当前批次的结束位置
         var end = (i + batchSize < jsonList.length) ? i + batchSize : jsonList.length;
-        // 截取当前批次的数据
-        var currentBatchList = jsonList.sublist(i, end);
-
-        // 开启事务进行批量插入
+        var batchList = jsonList.sublist(i, end);
         await db.transaction((txn) async {
           var batch = txn.batch();
-          for (var item in currentBatchList) {
-            try {
-               Word w = Word.fromJson(item, bookName);
-               batch.insert('words', w.toMap());
-            } catch (e) {
-               // 容错：跳过格式错误的数据，不影响整体
-            }
+          for (var item in batchList) {
+             Word w = Word.fromJson(item, bookName);
+             batch.insert('words', w.toMap());
           }
           await batch.commit(noResult: true);
         });
-
-        // ✅【核心】暂停 1 毫秒，把控制权交还给 UI 线程，让加载圈转起来
         await Future.delayed(const Duration(milliseconds: 1));
       }
-      
-      debugPrint("✅ $bookName 全部导入完成！");
+      await saveStudyProgress(StudyProgress(bookName: bookName, currentGroup: 0));
     } catch (e) {
-      debugPrint("❌ 导入失败 ($jsonFileName): $e");
+      debugPrint("❌ Error: $e");
     } finally {
-      _isImporting = false; // 无论成功失败，都要释放锁
+      _isImporting = false;
     }
   }
 
-  // 获取单词
-  Future<List<Word>> getWordsByBook(String bookName) async {
+  // --- ✅ 补全所有缺失的方法 ---
+
+  Future<void> markWordAsLearned(int wordId) async {
     final db = await instance.database;
-    // 随机获取单词，限制 50 个防止加载过慢
-    final result = await db.query(
-      'words', 
-      where: 'bookName = ?', 
-      whereArgs: [bookName],
-      orderBy: 'RANDOM()', 
-      limit: 50 
-    );
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now()); 
+    await db.transaction((txn) async {
+      await txn.update('words', {'status': 1}, where: 'id = ?', whereArgs: [wordId]);
+      await txn.rawInsert('INSERT INTO study_logs (date, count) VALUES (?, 1) ON CONFLICT(date) DO UPDATE SET count = count + 1', [today]);
+    });
+  }
+
+  Future<int> getTodayCount() async {
+    final db = await instance.database;
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final result = await db.query('study_logs', where: 'date = ?', whereArgs: [today]);
+    if (result.isNotEmpty) return result.first['count'] as int;
+    return 0;
+  }
+
+  Future<Map<int, int>> getMonthlyData(int year, int month) async {
+    final db = await instance.database;
+    String prefix = DateFormat('yyyy-MM-').format(DateTime(year, month));
+    final result = await db.query('study_logs', where: "date LIKE ?", whereArgs: ['$prefix%']);
+    Map<int, int> stats = {};
+    for (var row in result) {
+      String date = row['date'] as String; 
+      int day = int.parse(date.split('-')[2]); 
+      stats[day] = row['count'] as int;
+    }
+    return stats;
+  }
+
+  Future<StudyProgress> getStudyProgress(String bookName) async {
+    final db = await instance.database;
+    final res = await db.query('study_progress', where: 'bookName = ?', whereArgs: [bookName]);
+    if (res.isNotEmpty) return StudyProgress.fromMap(res.first);
+    return StudyProgress(bookName: bookName, currentGroup: 0);
+  }
+
+  Future<void> saveStudyProgress(StudyProgress p) async {
+    final db = await instance.database;
+    await db.insert('study_progress', p.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<int> getTotalWords(String bookName) async {
+    final db = await instance.database;
+    var res = await db.rawQuery('SELECT count(*) FROM words WHERE bookName = ?', [bookName]);
+    return Sqflite.firstIntValue(res) ?? 0;
+  }
+
+  Future<List<Word>> getUnlearnedWords(String bookName, {int limit = 20}) async {
+    final db = await instance.database;
+    final result = await db.query('words', where: 'bookName = ? AND status = 0', whereArgs: [bookName], orderBy: 'id ASC', limit: limit);
     return result.map((json) => Word.fromMap(json)).toList();
+  }
+  
+  // 兼容旧方法
+  Future<List<Word>> getWordsByBook(String bookName) async {
+    return getUnlearnedWords(bookName);
+  }
+
+  Future<void> devUpdateStat(String date, int count) async {
+    final db = await instance.database;
+    await db.insert('study_logs', {'date': date, 'count': count}, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }
