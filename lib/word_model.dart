@@ -4,7 +4,14 @@ class Word {
   final String phonetic;
   final String definition;
   final String bookName;
-  int status; // 0:未学, 1:认识, 2:忘记
+  int status; // 0:未学, 1:已学/复习中
+  
+  // 艾宾浩斯字段
+  int reviewStage; 
+  String? nextReviewTime;
+  
+  // ✅ 新增：错题标记 (0:正常, 1:错题)
+  int isMistake; 
 
   Word({
     this.id,
@@ -13,6 +20,9 @@ class Word {
     required this.definition,
     required this.bookName,
     this.status = 0,
+    this.reviewStage = 0,
+    this.nextReviewTime,
+    this.isMistake = 0, // 默认为 0
   });
 
   factory Word.fromMap(Map<String, dynamic> map) {
@@ -23,6 +33,9 @@ class Word {
       definition: map['definition'] ?? '',
       bookName: map['bookName'] ?? '',
       status: map['status'] ?? 0,
+      reviewStage: map['reviewStage'] ?? 0,
+      nextReviewTime: map['nextReviewTime'],
+      isMistake: map['isMistake'] ?? 0,
     );
   }
 
@@ -33,10 +46,12 @@ class Word {
       'definition': definition,
       'bookName': bookName,
       'status': status,
+      'reviewStage': reviewStage,
+      'nextReviewTime': nextReviewTime,
+      'isMistake': isMistake,
     };
   }
 
-  // ✅ 万能适配器
   factory Word.fromJson(Map<String, dynamic> json, String bookName) {
     if (json.containsKey('headWord') && json.containsKey('content')) {
       try {
@@ -74,7 +89,6 @@ class Word {
   }
 }
 
-// ✅ 新增：学习进度类 (解决 main.dart 报错的关键)
 class StudyProgress {
   final String bookName;
   int currentGroup;
