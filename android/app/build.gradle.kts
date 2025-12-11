@@ -24,7 +24,10 @@ android {
         applicationId = "com.example.danci"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        
+        // ✅✅✅ 核心修复：强制改为 21 (解决 flutter_tts 导致的闪退/卡死问题)
+        minSdk = flutter.minSdkVersion 
+        
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
