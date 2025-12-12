@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:ui';
+import 'dart:ui' as ui; 
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:flutter_tts/flutter_tts.dart'; 
@@ -14,23 +14,29 @@ import 'word_model.dart';
 // ======================= 1. 全局状态 =======================
 class GlobalData {
   static String currentBook = "四级词汇";
-  static Map<String, Map<int, int>> loadedMonthData = {}; // 存储月度统计数据 (月 => {日: 数量})
+  static Map<String, Map<int, int>> loadedMonthData = {}; 
   static ValueNotifier<int> todayCountNotifier = ValueNotifier(0);
-  
   static final FlutterTts tts = FlutterTts();
 
+  // ✅ 保持 TTS 修复逻辑
   static Future<void> initTTS() async {
     try {
+      await tts.stop(); // 先停止
       await tts.setLanguage("en-US");
       await tts.setSpeechRate(0.5);
       await tts.setVolume(1.0);
       await tts.setPitch(1.0);
       
-      tts.setStartHandler(() => debugPrint("TTS: 开始播放"));
-      tts.setCompletionHandler(() => debugPrint("TTS: 播放完成"));
-      tts.setErrorHandler((msg) => debugPrint("TTS: 出错 - $msg"));
-
-      debugPrint("✅ TTS 初始化完成");
+      // iOS 音频配置，防止静音模式无声
+      await tts.setIosAudioCategory(
+          IosTextToSpeechAudioCategory.playback,
+          [
+            IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
+            IosTextToSpeechAudioCategoryOptions.allowBluetooth,
+            IosTextToSpeechAudioCategoryOptions.allowBluetoothA2DP,
+          ]);
+          
+      // await tts.awaitSpeakCompletion(true); // 可选：如果觉得反应慢可注释掉
     } catch (e) {
       debugPrint("❌ TTS 初始化失败: $e");
     }
@@ -39,9 +45,11 @@ class GlobalData {
   static Future<void> speak(String text) async {
     if (text.isNotEmpty) {
       try {
+        await tts.stop(); // 每次发音前强制停止，防止队列卡死
         await tts.speak(text);
       } catch (e) {
         debugPrint("❌ 发音失败: $e");
+        await initTTS(); // 出错重试初始化
       }
     }
   }
@@ -54,14 +62,12 @@ class GlobalData {
     String? last = await DatabaseHelper.instance.getLastBook();
     if (last != null) {
       currentBook = last;
-      debugPrint("📖 恢复上次词库: $currentBook");
     }
   }
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
   try {
     await GlobalData.initTTS();
     await GlobalData.loadConfig();
@@ -157,12 +163,14 @@ class _MainTabScreenState extends State<MainTabScreen> {
           bottomNavigationBar: ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
               child: BottomNavigationBar(
                 currentIndex: _currentIndex,
                 onTap: (index) {
                   setState(() => _currentIndex = index);
-                  if (index == 0) GlobalData.refreshTodayCount();
+                  if (index == 0) {
+                    GlobalData.refreshTodayCount();
+                  }
                 },
                 backgroundColor: Colors.white.withValues(alpha: 0.8),
                 selectedItemColor: Colors.lime[800],
@@ -217,7 +225,6 @@ class _HomePageState extends State<HomePage> {
                       const SizedBox(width: 10),
                       Text("Lemon\nSplash", style: TextStyle(fontSize: 24, height: 1.0, fontFamily: 'Georgia', fontWeight: FontWeight.bold, color: Colors.teal[800])),
                       const Spacer(),
-                      
                       GestureDetector(
                         onTap: () {
                            ScaffoldMessenger.of(context).showSnackBar(
@@ -226,15 +233,8 @@ class _HomePageState extends State<HomePage> {
                         },
                         child: Container(
                           padding: const EdgeInsets.all(2), 
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.green, width: 2), 
-                          ),
-                          child: const CircleAvatar(
-                            radius: 18, 
-                            backgroundColor: Colors.white, 
-                            child: Icon(Icons.person, color: Colors.grey)
-                          ),
+                          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.green, width: 2)),
+                          child: const CircleAvatar(radius: 18, backgroundColor: Colors.white, child: Icon(Icons.person, color: Colors.grey)),
                         ),
                       ),
                     ],
@@ -248,7 +248,9 @@ class _HomePageState extends State<HomePage> {
                     color: Colors.cyan,
                     onTap: () async {
                       await Navigator.push(context, MaterialPageRoute(builder: (c) => const BookLibraryPage()));
-                      if (mounted) setState(() {}); 
+                      if (mounted) {
+                        setState(() {});
+                      } 
                     },
                   ),
                   const SizedBox(height: 20),
@@ -271,7 +273,9 @@ class _HomePageState extends State<HomePage> {
                   GestureDetector(
                     onTap: () async {
                        await Navigator.push(context, MaterialPageRoute(builder: (c) => const WordLearningPage()));
-                       if (mounted) GlobalData.refreshTodayCount();
+                       if (mounted) {
+                         GlobalData.refreshTodayCount();
+                       }
                     },
                     child: Container(
                       height: 70, 
@@ -290,9 +294,7 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
-                  
                   const SizedBox(height: 20),
-
                   Row(
                     children: [
                       Expanded(
@@ -302,7 +304,9 @@ class _HomePageState extends State<HomePage> {
                           color: Colors.blue,
                           onTap: () async {
                             await Navigator.push(context, MaterialPageRoute(builder: (c) => const ReviewPage()));
-                            if (mounted) GlobalData.refreshTodayCount();
+                            if (mounted) {
+                              GlobalData.refreshTodayCount();
+                            }
                           },
                         )
                       ),
@@ -319,7 +323,6 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 120), 
                 ],
               ),
@@ -336,10 +339,7 @@ class _SecondaryButton extends StatelessWidget {
   final String text;
   final Color color;
   final VoidCallback onTap;
-
-  const _SecondaryButton({
-    required this.icon, required this.text, required this.color, required this.onTap
-  });
+  const _SecondaryButton({required this.icon, required this.text, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -371,22 +371,14 @@ class LemonGlassCard extends StatelessWidget {
   final String value;
   final MaterialColor color;
   final VoidCallback onTap;
-
-  const LemonGlassCard({
-    super.key,
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.color,
-    required this.onTap,
-  });
+  const LemonGlassCard({super.key, required this.icon, required this.title, required this.value, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
           color: Colors.white.withValues(alpha: 0.5),
           child: Material(
@@ -422,30 +414,25 @@ class BookLibraryPage extends StatefulWidget {
 }
 
 class _BookLibraryPageState extends State<BookLibraryPage> {
-  
   void _showOrderSelectionDialog(String name, String file) {
     showDialog(
       context: context,
       builder: (c) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text("正在开启《$name》", style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text(
-          "请选择学习顺序：\n\n⚠️ 注意：切换词库会重置该书的进度。",
-          style: TextStyle(color: Colors.grey, fontSize: 14),
-        ),
+        content: const Text("请选择学习顺序：\n\n⚠️ 注意：切换词库会重置该书的进度。", style: TextStyle(color: Colors.grey, fontSize: 14)),
         actionsAlignment: MainAxisAlignment.spaceEvenly,
         actions: [
           OutlinedButton.icon(
             onPressed: () { Navigator.pop(c); _import(name, file, isShuffle: false); },
             icon: const Icon(Icons.sort, color: Colors.teal),
             label: const Text("顺序模式", style: TextStyle(color: Colors.teal)),
-            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
           ),
           ElevatedButton.icon(
             onPressed: () { Navigator.pop(c); _import(name, file, isShuffle: true); },
             icon: const Icon(Icons.shuffle),
             label: const Text("乱序模式"),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
           ),
         ],
       ),
@@ -456,9 +443,10 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Row(children: [const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)), const SizedBox(width: 20), Text("正在准备 $name...")]), duration: const Duration(seconds: 60))
     );
-    
     await Future.delayed(const Duration(milliseconds: 100));
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     bool success = await DatabaseHelper.instance.importJsonData(file, name, isShuffle: isShuffle);
     
@@ -467,10 +455,9 @@ class _BookLibraryPageState extends State<BookLibraryPage> {
       if (success) {
         GlobalData.currentBook = name;
         Navigator.pop(context); 
-        // ✅ 提示仅持续 1 秒
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ 词库设置成功！"), duration: Duration(seconds: 1)));
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: Colors.red, content: Text("❌ 导入失败，请检查文件是否存在: $file")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: Colors.red, content: Text("❌ 导入失败: $file")));
       }
     }
   }
@@ -550,14 +537,11 @@ class _StatsPageState extends State<StatsPage> {
   void initState() {
     super.initState();
     _initMonths();
-    // ✅ 修复 Bug：在初始化时加载所有月份的总数据
-    _loadAllMonthData(); 
   }
 
   void _initMonths() async {
     final db = await DatabaseHelper.instance.database;
     final result = await db.rawQuery("SELECT MIN(date) as d FROM study_logs");
-    
     DateTime startDate = DateTime.now(); 
     if (result.isNotEmpty && result.first['d'] != null) {
       startDate = DateTime.parse(result.first['d'] as String);
@@ -565,54 +549,29 @@ class _StatsPageState extends State<StatsPage> {
     
     List<String> list = [];
     DateTime now = DateTime.now();
-    
     for (int i = 0; i < 24; i++) {
        DateTime targetDate = DateTime(now.year, now.month - i, 1);
-       DateTime startMonth = DateTime(startDate.year, startDate.month, 1);
-       if (targetDate.isBefore(startMonth)) break;
+       if (targetDate.isBefore(DateTime(startDate.year, startDate.month, 1))) break;
        list.add(DateFormat('yyyy-MM').format(targetDate));
     }
     
     if (mounted) {
-      setState(() {
-        _months = list;
-        _isLoading = false;
-      });
-    }
-  }
-
-  // ✅ 新增：加载所有月份的总数据 (用于月份右侧显示)
-  Future<void> _loadAllMonthData() async {
-    final List<Future<void>> futures = [];
-    final db = await DatabaseHelper.instance.database;
-
-    // 预先加载所有月份的数据，只计算总和并缓存
-    for (String month in _months) {
-      if (!GlobalData.loadedMonthData.containsKey(month)) {
-        futures.add(_loadMonthData(month));
+      setState(() { _months = list; _isLoading = false; });
+      for (String m in list) {
+        _loadMonthData(m);
       }
     }
-    await Future.wait(futures);
-
-    // 强制刷新 UI，确保总数显示
-    if (mounted) setState(() {});
   }
 
-
   Future<void> _loadMonthData(String month) async {
-    // 如果已经缓存了，直接返回
-    if (GlobalData.loadedMonthData.containsKey(month)) return; 
-    
+    if (GlobalData.loadedMonthData.containsKey(month)) {
+      return;
+    }
     int year = int.parse(month.split('-')[0]);
     int m = int.parse(month.split('-')[1]);
-    
-    // 从数据库获取日数据
     var data = await DatabaseHelper.instance.getMonthlyData(year, m);
-    
-    // 计算总数并存入全局缓存 (这里缓存了日数据，方便后续计算总和)
     if (mounted) {
-      // 不再调用 setState() 频繁刷新，而是直接更新 GlobalData
-      GlobalData.loadedMonthData[month] = data; 
+      setState(() => GlobalData.loadedMonthData[month] = data);
     }
   }
 
@@ -624,7 +583,7 @@ class _StatsPageState extends State<StatsPage> {
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator(color: Colors.lime))
         : _months.isEmpty 
-          ? Center(child: Text("暂无记录，快去背个单词吧！", style: TextStyle(color: Colors.grey[600])))
+          ? Center(child: Text("暂无记录", style: TextStyle(color: Colors.grey[600])))
           : ListView.builder(
               padding: const EdgeInsets.all(20),
               itemCount: _months.length,
@@ -632,8 +591,6 @@ class _StatsPageState extends State<StatsPage> {
                 String month = _months[index];
                 bool isExpanded = _expandedIndex == index;
                 int totalCount = 0;
-
-                // 从全局缓存中获取总数 (加载完 _loadAllMonthData() 后这里就会有数据)
                 if (GlobalData.loadedMonthData.containsKey(month)) {
                    totalCount = GlobalData.loadedMonthData[month]!.values.fold(0, (sum, val) => sum + val);
                 }
@@ -650,23 +607,16 @@ class _StatsPageState extends State<StatsPage> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(month, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.teal)),
-                            // ✅ 修复 Bug：这里直接显示总数 (依赖 _loadAllMonthData)
                             if (totalCount > 0)
-                               Container(
-                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                 decoration: BoxDecoration(color: Colors.lime[50], borderRadius: BorderRadius.circular(10)),
-                                 child: Text("$totalCount词", style: TextStyle(fontSize: 12, color: Colors.lime[800], fontWeight: FontWeight.bold))
-                               ),
+                               Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: Colors.lime[50], borderRadius: BorderRadius.circular(10)), child: Text("$totalCount词", style: TextStyle(fontSize: 12, color: Colors.lime[800], fontWeight: FontWeight.bold))),
                           ],
                         ),
-                        // 展开后显示总数
-                        subtitle: isExpanded ? Text("本月共学习 $totalCount 个单词") : null, 
+                        subtitle: isExpanded ? Text("本月共学习 $totalCount 个单词") : null,
                         trailing: Icon(isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, color: Colors.grey),
                         onTap: () {
-                          // 展开/收起时，如果数据不存在，再异步加载一次（保障）
                           setState(() => _expandedIndex = isExpanded ? -1 : index);
-                          if (_expandedIndex == index && !GlobalData.loadedMonthData.containsKey(month)) { 
-                             _loadMonthData(month);
+                          if (_expandedIndex == index) {
+                            _loadMonthData(month);
                           }
                         },
                       ),
@@ -689,7 +639,7 @@ class _StatsPageState extends State<StatsPage> {
   Widget _buildChart(String month) {
     var data = GlobalData.loadedMonthData[month];
     if (data == null) return const Center(child: CircularProgressIndicator(color: Colors.lime));
-    if (data.isEmpty) return const Center(child: Text("本月太懒了，还没有学习记录哦 ~", style: TextStyle(color: Colors.grey)));
+    if (data.isEmpty) return const Center(child: Text("无记录", style: TextStyle(color: Colors.grey)));
 
     List<FlSpot> spots = [];
     double maxVal = 0;
@@ -716,12 +666,7 @@ class _StatsPageState extends State<StatsPage> {
             belowBarData: BarAreaData(show: true, color: Colors.teal.withValues(alpha: 0.1)),
           ),
         ],
-        lineTouchData: LineTouchData(
-          touchTooltipData: LineTouchTooltipData(
-            getTooltipColor: (spot) => Colors.teal,
-            getTooltipItems: (spots) => spots.map((spot) => LineTooltipItem("${spot.x.toInt()}日\n${spot.y.toInt()}词", const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))).toList()
-          )
-        ),
+        lineTouchData: LineTouchData(touchTooltipData: LineTouchTooltipData(getTooltipColor: (spot) => Colors.teal, getTooltipItems: (spots) => spots.map((spot) => LineTooltipItem("${spot.x.toInt()}日\n${spot.y.toInt()}词", const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))).toList())),
       ),
     );
   }
@@ -773,18 +718,17 @@ class _SettingsPageState extends State<SettingsPage> {
         TextField(controller: cCtrl, decoration: const InputDecoration(labelText: "数量"), keyboardType: TextInputType.number),
       ]),
       actions: [
-        TextButton(
-          onPressed: ()=>Navigator.pop(c), 
-          child: const Text("取消")
-        ),
+        TextButton(onPressed: ()=>Navigator.pop(c), child: const Text("取消")),
         TextButton(
           onPressed: () async {
             if (dCtrl.text.isNotEmpty && cCtrl.text.isNotEmpty) {
               await DatabaseHelper.instance.devUpdateStat(dCtrl.text, int.parse(cCtrl.text));
-              if (!c.mounted) return;
+              if (!c.mounted) {
+                return;
+              }
               Navigator.pop(c);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("修改成功，去统计页刷新看看")));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("修改成功")));
                 GlobalData.loadedMonthData.clear();
                 setState(() {});
               }
@@ -810,7 +754,6 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text("https://github.com/1877510091/Lemon-Splash", style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline)),
           onTap: _launchGithub,
         ),
-        
         ListTile(
           leading: const Icon(Icons.favorite_rounded, color: Colors.pink),
           title: const Text("赞赏作者", style: TextStyle(color: Colors.pink, fontWeight: FontWeight.bold)),
@@ -818,7 +761,6 @@ class _SettingsPageState extends State<SettingsPage> {
           trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const DonationPage())),
         ),
-
         const Divider(),
         ListTile(leading: const Icon(Icons.verified, color: Colors.purple), title: const Text("版本号"), subtitle: const Text("v1.3 (Build 2025)"), onTap: _tapVer),
         if (_dev) Container(color: Colors.red[50], child: ListTile(leading: const Icon(Icons.bug_report, color: Colors.red), title: const Text("修改历史数据"), onTap: _editData)),
@@ -832,26 +774,18 @@ class DonationPage extends StatelessWidget {
   const DonationPage({super.key});
 
   Future<void> _saveImage(BuildContext context, String assetPath) async {
-    // 1. 请求权限 (gal 插件要求)
     await [Permission.storage].request();
-
     try {
       final ByteData byteData = await rootBundle.load(assetPath);
       final Uint8List buffer = byteData.buffer.asUint8List();
-
       await Gal.putImageBytes(buffer, name: "lemon_donate_${DateTime.now().millisecondsSinceEpoch}");
-
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ 已保存到相册，感谢支持！")));
         Navigator.pop(context); 
       }
     } catch (e) {
       if (context.mounted) {
-         if (e is GalException && e.type == GalExceptionType.accessDenied) {
-             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("❌ 没有相册权限，请在设置中开启")));
-         } else {
-             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("保存出错: $e")));
-         }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("保存出错: $e")));
       }
     }
   }
@@ -864,13 +798,7 @@ class DonationPage extends StatelessWidget {
         content: const Text("是否将这张图片保存到相册？"),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c), child: const Text("取消")),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(c); 
-              _saveImage(context, assetPath);
-            }, 
-            child: const Text("保存")
-          ),
+          ElevatedButton(onPressed: () { Navigator.pop(c); _saveImage(context, assetPath); }, child: const Text("保存")),
         ],
       ),
     );
@@ -912,17 +840,9 @@ class DonationPage extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            width: 140, 
-            height: 140,
-            decoration: BoxDecoration(
-              border: Border.all(color: color.withValues(alpha: 0.3), width: 2),
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 5))]
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Image.asset(path, fit: BoxFit.cover),
-            ),
+            width: 140, height: 140,
+            decoration: BoxDecoration(border: Border.all(color: color.withValues(alpha: 0.3), width: 2), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.grey.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 5))]),
+            child: ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.asset(path, fit: BoxFit.cover)),
           ),
           const SizedBox(height: 12),
           Container(
@@ -936,7 +856,7 @@ class DonationPage extends StatelessWidget {
   }
 }
 
-// ======================= 8. 背单词页面 (✅ V3.9 最终优化版) =======================
+// ======================= 8. 背单词页面 =======================
 class WordLearningPage extends StatefulWidget {
   const WordLearningPage({super.key});
   @override
@@ -962,7 +882,6 @@ class _WordLearningPageState extends State<WordLearningPage> {
 
   void _loadBatch(int groupIndex) async {
     setState(() => _isLoading = true);
-    
     List<Word> fixedGroup = await DatabaseHelper.instance.getWordsByGroup(GlobalData.currentBook, groupIndex);
     
     if (fixedGroup.isEmpty) {
@@ -993,26 +912,29 @@ class _WordLearningPageState extends State<WordLearningPage> {
 
   void _handlePrevious() {
     if (_idx > 0) {
-      setState(() {
-        _idx--;
-      });
+      setState(() { _idx--; });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已经是第一个了"), duration: Duration(milliseconds: 500)));
     }
   }
 
   void _handle(bool known) async {
-    if (_idx >= _batch.length) return;
-    
+    if (_idx >= _batch.length) {
+      return;
+    }
     await DatabaseHelper.instance.markWordAsLearned(_batch[_idx].id!, isMistake: !known);
-    if (known) await GlobalData.refreshTodayCount();
+    if (known) {
+      await GlobalData.refreshTodayCount();
+    }
     
     if (_idx < _batch.length - 1) {
       setState(() => _idx++);
     } else {
       _progress!.lastReviewTime = DateTime.now();
       await DatabaseHelper.instance.saveStudyProgress(_progress!);
-      if (mounted) _showFinishDialog();
+      if (mounted) {
+        _showFinishDialog();
+      }
     }
   }
 
@@ -1025,7 +947,6 @@ class _WordLearningPageState extends State<WordLearningPage> {
         content: const Text("太棒了！休息一下还是继续？"),
         actions: [
           TextButton(child: const Text("再复习一遍"), onPressed: () { Navigator.pop(c); setState(() { _idx = 0; }); }),
-          
           ElevatedButton(child: const Text("下一组"), onPressed: () async { 
             Navigator.pop(c); 
             _progress!.currentGroup++; 
@@ -1037,21 +958,46 @@ class _WordLearningPageState extends State<WordLearningPage> {
     );
   }
 
+  Widget _buildAdaptiveText(String text, double maxWidth, Color color) {
+    const double baseSize = 48.0;
+    const double minSingleLineSize = 20.0; 
+
+    final style = TextStyle(fontSize: baseSize, fontWeight: FontWeight.bold, color: color, fontFamily: 'Georgia');
+    final textPainter = TextPainter(text: TextSpan(text: text, style: style), textDirection: ui.TextDirection.ltr, maxLines: 1)..layout(maxWidth: double.infinity);
+
+    if (textPainter.size.width <= maxWidth) {
+      return Text(text, style: style, textAlign: TextAlign.center);
+    } else {
+      final double scale = maxWidth / textPainter.size.width;
+      final double scaledSize = baseSize * scale;
+
+      if (scaledSize >= minSingleLineSize) {
+        return Text(text, style: style.copyWith(fontSize: scaledSize), textAlign: TextAlign.center, maxLines: 1);
+      } else {
+        double multiLineSize;
+        if (text.length > 15) {
+          multiLineSize = 22.0; 
+        } else if (text.length > 10) {
+          multiLineSize = 26.0; 
+        } else {
+          multiLineSize = 32.0; 
+        }
+
+        return Text(
+          text, 
+          style: style.copyWith(fontSize: multiLineSize), 
+          textAlign: TextAlign.center, 
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator(color: Colors.lime)));
     if (_batch.isEmpty) return Scaffold(appBar: AppBar(), body: const Center(child: Text("本书完！")));
 
     final word = _batch[_idx];
-
-    // ✅ 单词长度计算，决定初始字号
-    double initialFontSize = 48; // 最大字号
-    if (word.word.length > 14) {
-      initialFontSize = 32; // 超长词
-    } else if (word.word.length > 9) {
-      initialFontSize = 40; // 长词
-    }
-
     return Scaffold(
       backgroundColor: const Color(0xFFE0F2F1),
       appBar: AppBar(title: Text("分组: ${_progress!.currentGroup + 1} | 进度: ${_idx + 1}/${_batch.length}")),
@@ -1061,123 +1007,94 @@ class _WordLearningPageState extends State<WordLearningPage> {
             LinearProgressIndicator(value: (_idx + 1) / _batch.length, color: Colors.lime, backgroundColor: Colors.white),
             const Spacer(),
             
-            // ================= 单词卡片区域 =================
+            // 单词卡片区
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 30),
-              padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 30),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(40), boxShadow: [BoxShadow(color: Colors.teal.withValues(alpha: 0.1), blurRadius: 30, offset: const Offset(0, 15))]),
+              padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 30),
+              decoration: BoxDecoration(
+                color: Colors.white, 
+                borderRadius: BorderRadius.circular(40), 
+                boxShadow: [BoxShadow(color: Colors.teal.withValues(alpha: 0.1), blurRadius: 30, offset: const Offset(0, 15))]
+              ),
               child: Column(
                 children: [
-                  // ✅ V3.9 单词显示：智能适应 + 换行策略
-                  Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            // 1. 计算宽度是否能容纳当前字号 (即使是 48 号)
-                            final TextPainter textPainter = TextPainter(
-                              text: TextSpan(text: word.word, style: TextStyle(fontSize: initialFontSize, fontWeight: FontWeight.bold)),
-                              textDirection: TextDirection.ltr,
-                            )..layout();
-
-                            // 2. 检查是否需要缩小或换行 (允许最多两行)
-                            bool needsReflow = textPainter.width > constraints.maxWidth * 2; // 如果单词长到连两倍宽度都超了
-
-                            // 3. 策略：如果字号已经很小了（32），且还是需要超过 2 行宽度，
-                            // 那么我们就信任初定字号 (initialFontSize)，让它换行，不使用 FittedBox 强制缩小
-                            if (needsReflow || initialFontSize <= 32) {
-                                return Text(
-                                  word.word,
-                                  textAlign: TextAlign.center, 
-                                  maxLines: 2, 
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: initialFontSize, // 使用初始计算出的字号
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.teal[900],
-                                    fontFamily: 'Georgia',
-                                    height: 1.1,
-                                  ),
-                                );
-                            } else {
-                                // 4. 短词或中长词：使用 FittedBox 适应到 1-2行
-                                return FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                        word.word,
-                                        textAlign: TextAlign.center, 
-                                        maxLines: 1, // 目标是 1 行，但 FittedBox 会控制
-                                        style: TextStyle(
-                                            fontSize: initialFontSize, 
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.teal[900],
-                                            fontFamily: 'Georgia',
-                                        ),
-                                    ),
-                                );
-                            }
-                          },
-                        ),
-                      ),
-                      
-                      // 喇叭图标
-                      IconButton(
-                        icon: Icon(Icons.volume_up_rounded, color: Colors.teal[300], size: 32),
-                        onPressed: () => GlobalData.speak(word.word),
-                      ),
-                    ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Expanded(child: _buildAdaptiveText(word.word, constraints.maxWidth - 50, Colors.teal[900]!)),
+                          const SizedBox(width: 10),
+                          IconButton(icon: Icon(Icons.volume_up_rounded, color: Colors.teal[300], size: 32), onPressed: () => GlobalData.speak(word.word)),
+                        ],
+                      );
+                    }
                   ),
-                  
                   if (word.phonetic.isNotEmpty) Text("/${word.phonetic}/", style: TextStyle(fontSize: 20, color: Colors.lime[700])),
                   const SizedBox(height: 30),
                   Container(
-                    constraints: const BoxConstraints(maxHeight: 150),
+                    constraints: const BoxConstraints(maxHeight: 200), 
                     child: SingleChildScrollView(
-                      child: Text(word.definition, textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.grey[600], height: 1.5)),
+                      child: Column(
+                        children: [
+                          Text(word.definition, textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.grey[600], height: 1.5)),
+                          if (word.example.isNotEmpty) ...[
+                            const SizedBox(height: 20),
+                            const Divider(indent: 40, endIndent: 40),
+                            const SizedBox(height: 10),
+                            Text(word.example, textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.teal[700], fontStyle: FontStyle.italic)),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            
             const Spacer(flex: 2),
             
-            // ================= 按钮布局 (两行) =================
+            // ✅ 底部按钮区域 (修改为新 UI)
             Padding(
-              padding: const EdgeInsets.only(bottom: 40.0, left: 30, right: 30),
+              padding: const EdgeInsets.only(bottom: 40.0, left: 30, right: 30), 
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 第一行：忘记 - 认识
+                  // 第一排：忘记 & 认识 (大按钮)
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly, 
                     children: [
                       _btn(Icons.close, Colors.red[50]!, Colors.red[300]!, "忘记", () => _handle(false)),
-                      const SizedBox(width: 40), 
+                      const SizedBox(width: 40), // 间距
                       _btn(Icons.check, Colors.lime[100]!, Colors.lime[800]!, "认识", () => _handle(true)),
-                    ],
+                    ]
                   ),
                   
-                  const SizedBox(height: 25), 
-                  
-                  // 第二行：单独的撤销按钮
-                  GestureDetector(
-                    onTap: _handlePrevious,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
+                  const SizedBox(height: 30), 
+
+                  // 第二排：撤销 (小胶囊按钮，左下对齐)
+                  Align(
+                    alignment: Alignment.centerLeft, // 左对齐
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 10), // 稍微缩进一点
+                      child: InkWell(
+                        onTap: _handlePrevious,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.grey[300]!),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.reply_rounded, size: 20, color: Colors.grey[600]), 
-                          const SizedBox(width: 6),
-                          Text("撤销", style: TextStyle(fontSize: 14, color: Colors.grey[600], fontWeight: FontWeight.bold)),
-                        ],
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(20), // 胶囊形状
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.reply_rounded, size: 20, color: Colors.grey[600]),
+                              const SizedBox(width: 6),
+                              Text("撤销", style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold, fontSize: 14)),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1190,27 +1107,21 @@ class _WordLearningPageState extends State<WordLearningPage> {
     );
   }
 
-  // 按钮组件
+  // ✅ 辅助按钮方法 (保持大圆按钮样式)
   Widget _btn(IconData icon, Color bg, Color fg, String label, VoidCallback tap) {
-    return Expanded( 
-      child: GestureDetector(
-        onTap: tap,
-        child: Container(
-          height: 80,
-          decoration: BoxDecoration(
-            color: bg, 
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [BoxShadow(color: fg.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 5))]
+    return GestureDetector(
+      onTap: tap,
+      child: Column(
+        children: [
+          Container(
+            width: 75, 
+            height: 75, 
+            decoration: BoxDecoration(color: bg, shape: BoxShape.circle, boxShadow: [BoxShadow(color: bg.withValues(alpha: 0.5), blurRadius: 10, offset: const Offset(0, 4))]),
+            child: Icon(icon, color: fg, size: 36)
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: fg, size: 32),
-              const SizedBox(height: 4),
-              Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.bold, fontSize: 16))
-            ],
-          ),
-        ),
+          const SizedBox(height: 8),
+          Text(label, style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold, fontSize: 16))
+        ],
       ),
     );
   }
@@ -1239,25 +1150,18 @@ class _ReviewPageState extends State<ReviewPage> {
     setState(() => _isLoading = true);
     List<Word> words = await DatabaseHelper.instance.getWordsDueForReview();
     if (mounted) {
-      setState(() {
-        _reviewWords = words;
-        _isLoading = false;
-        _idx = 0;
-        _showAnswer = false;
-      });
+      setState(() { _reviewWords = words; _isLoading = false; _idx = 0; _showAnswer = false; });
     }
   }
 
   void _handleReview(bool remembered) async {
-    if (_idx >= _reviewWords.length) return;
+    if (_idx >= _reviewWords.length) {
+      return;
+    }
     Word currentWord = _reviewWords[_idx];
     await DatabaseHelper.instance.processReview(currentWord.id!, remembered, currentWord.reviewStage);
-    
     if (_idx < _reviewWords.length - 1) {
-      setState(() {
-        _idx++;
-        _showAnswer = false; 
-      });
+      setState(() { _idx++; _showAnswer = false; });
     } else {
       _showFinishDialog();
     }
@@ -1270,48 +1174,53 @@ class _ReviewPageState extends State<ReviewPage> {
       builder: (c) => AlertDialog(
         title: const Text("🎉 复习完成"),
         content: const Text("今天的任务完成啦！记忆曲线已更新。"),
-        actions: [
-          ElevatedButton(
-            child: const Text("返回首页"), 
-            onPressed: () { 
-              Navigator.pop(c); 
-              Navigator.pop(context); 
-            }
-          ),
-        ],
+        actions: [ElevatedButton(child: const Text("返回首页"), onPressed: () { Navigator.pop(c); Navigator.pop(context); })],
       ),
     );
   }
 
+  Widget _buildAdaptiveText(String text, double maxWidth, Color color) {
+    const double baseSize = 48.0;
+    const double minSingleLineSize = 20.0;
+    final style = TextStyle(fontSize: baseSize, fontWeight: FontWeight.bold, color: color, fontFamily: 'Georgia');
+    final textPainter = TextPainter(text: TextSpan(text: text, style: style), textDirection: ui.TextDirection.ltr, maxLines: 1)..layout(maxWidth: double.infinity);
+
+    if (textPainter.size.width <= maxWidth) {
+      return Text(text, style: style, textAlign: TextAlign.center);
+    } else {
+      final double scale = maxWidth / textPainter.size.width;
+      final double scaledSize = baseSize * scale;
+
+      if (scaledSize >= minSingleLineSize) {
+        return Text(text, style: style.copyWith(fontSize: scaledSize), textAlign: TextAlign.center, maxLines: 1);
+      } else {
+        double multiLineSize;
+        if (text.length > 15) {
+          multiLineSize = 22.0; 
+        } else if (text.length > 10) {
+          multiLineSize = 26.0; 
+        } else {
+          multiLineSize = 32.0; 
+        }
+        return Text(
+          text, 
+          style: style.copyWith(fontSize: multiLineSize), 
+          textAlign: TextAlign.center, 
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator(color: Colors.blue)));
-    
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator(color: Colors.blue)));
+    }
     if (_reviewWords.isEmpty) {
-      return Scaffold(
-        appBar: AppBar(title: const Text("智能复习")),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.done_all_rounded, size: 80, color: Colors.blue[200]),
-              const SizedBox(height: 20),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 40.0),
-                child: Text(
-                  "复习算法会根据艾宾浩斯遗忘曲线\n在几天后整理需要复习的单词", 
-                  textAlign: TextAlign.center, 
-                  style: TextStyle(fontSize: 16, color: Colors.grey, height: 1.5)
-                ),
-              ),
-            ],
-          )
-        ),
-      );
+      return Scaffold(appBar: AppBar(title: const Text("智能复习")), body: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.done_all_rounded, size: 80, color: Colors.blue[200]), const SizedBox(height: 20), const Padding(padding: EdgeInsets.symmetric(horizontal: 40.0), child: Text("复习算法会根据艾宾浩斯遗忘曲线\n在几天后整理需要复习的单词", textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey, height: 1.5)))])));
     }
 
     final word = _reviewWords[_idx];
-    
     return Scaffold(
       backgroundColor: const Color(0xFFE3F2FD), 
       appBar: AppBar(title: Text("复习进度: ${_idx + 1}/${_reviewWords.length}")),
@@ -1320,40 +1229,42 @@ class _ReviewPageState extends State<ReviewPage> {
           children: [
             LinearProgressIndicator(value: (_idx + 1) / _reviewWords.length, color: Colors.blue, backgroundColor: Colors.white),
             const Spacer(),
-            
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 30),
               padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 30),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(40), boxShadow: [BoxShadow(color: Colors.blue.withValues(alpha: 0.1), blurRadius: 30, offset: const Offset(0, 15))]),
               child: Column(
                 children: [
-                  // ✅ 复习页：单词 + 发音 (✅ 修复 Overflow：使用 Flexible 包裹文本)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          word.word, 
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: Colors.blue[900], fontFamily: 'Georgia')
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      IconButton(
-                        icon: const Icon(Icons.volume_up_rounded, color: Colors.blue),
-                        onPressed: () => GlobalData.speak(word.word),
-                      ),
-                    ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Expanded(child: _buildAdaptiveText(word.word, constraints.maxWidth - 50, Colors.blue[900]!)),
+                          const SizedBox(width: 10),
+                          IconButton(icon: const Icon(Icons.volume_up_rounded, color: Colors.blue), onPressed: () => GlobalData.speak(word.word)),
+                        ],
+                      );
+                    }
                   ),
                   const SizedBox(height: 10),
-                  
                   if (_showAnswer) ...[
                     if (word.phonetic.isNotEmpty) Text("/${word.phonetic}/", style: TextStyle(fontSize: 20, color: Colors.blue[700])),
                     const SizedBox(height: 30),
                     Container(
-                      constraints: const BoxConstraints(maxHeight: 150),
+                      constraints: const BoxConstraints(maxHeight: 200),
                       child: SingleChildScrollView(
-                        child: Text(word.definition, textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.grey[600], height: 1.5)),
+                        child: Column(
+                          children: [
+                            Text(word.definition, textAlign: TextAlign.center, style: TextStyle(fontSize: 18, color: Colors.grey[600], height: 1.5)),
+                            if (word.example.isNotEmpty) ...[
+                              const SizedBox(height: 20),
+                              const Divider(indent: 40, endIndent: 40),
+                              const SizedBox(height: 10),
+                              Text(word.example, textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.blue[700], fontStyle: FontStyle.italic)),
+                            ],
+                          ],
+                        ),
                       ),
                     ),
                   ] else ...[
@@ -1364,27 +1275,12 @@ class _ReviewPageState extends State<ReviewPage> {
                 ],
               ),
             ),
-            
             const Spacer(flex: 2),
-            
             if (!_showAnswer)
-              GestureDetector(
-                onTap: () => setState(() => _showAnswer = true),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                  decoration: BoxDecoration(color: Colors.blue[100], borderRadius: BorderRadius.circular(30)),
-                  child: const Text("查看答案", style: TextStyle(fontSize: 18, color: Colors.blue, fontWeight: FontWeight.bold)),
-                ),
-              )
+              GestureDetector(onTap: () => setState(() => _showAnswer = true), child: Container(padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15), decoration: BoxDecoration(color: Colors.blue[100], borderRadius: BorderRadius.circular(30)), child: const Text("查看答案", style: TextStyle(fontSize: 18, color: Colors.blue, fontWeight: FontWeight.bold))))
             else
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _btn(Icons.close, Colors.red[50]!, Colors.red[300]!, "忘记了", () => _handleReview(false)),
-                  _btn(Icons.check, Colors.lime[100]!, Colors.lime[800]!, "记得", () => _handleReview(true)),
-                ],
-              ),
-              
+              // ✅ 复习页面的按钮也保持一致性
+              Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [_btn(Icons.close, Colors.red[50]!, Colors.red[300]!, "忘记了", () => _handleReview(false)), _btn(Icons.check, Colors.lime[100]!, Colors.lime[800]!, "记得", () => _handleReview(true))]),
             const SizedBox(height: 50),
           ],
         ),
@@ -1397,7 +1293,7 @@ class _ReviewPageState extends State<ReviewPage> {
   }
 }
 
-// ======================= 10. 错题本页面 (带TTS功能) =======================
+// ======================= 10. 错题本页面 =======================
 class MistakeBookPage extends StatefulWidget {
   const MistakeBookPage({super.key});
   @override
@@ -1417,10 +1313,7 @@ class _MistakeBookPageState extends State<MistakeBookPage> {
   void _loadMistakes() async {
     final list = await DatabaseHelper.instance.getMistakeWords();
     if (mounted) {
-      setState(() {
-        _mistakes = list;
-        _isLoading = false;
-      });
+      setState(() { _mistakes = list; _isLoading = false; });
     }
   }
 
@@ -1440,16 +1333,7 @@ class _MistakeBookPageState extends State<MistakeBookPage> {
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator(color: Colors.orange))
         : _mistakes.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.emoji_events_outlined, size: 80, color: Colors.orange[200]),
-                  const SizedBox(height: 20),
-                  const Text("太强了！\n一个错题都没有！", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 18)),
-                ],
-              ),
-            )
+          ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.emoji_events_outlined, size: 80, color: Colors.orange[200]), const SizedBox(height: 20), const Text("太强了！\n一个错题都没有！", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 18))]))
           : ListView.builder(
               padding: const EdgeInsets.all(20),
               itemCount: _mistakes.length,
@@ -1462,31 +1346,10 @@ class _MistakeBookPageState extends State<MistakeBookPage> {
                     contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                     title: Text(word.word, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                     subtitle: Text(word.definition.split('\n')[0], maxLines: 1, overflow: TextOverflow.ellipsis),
-                    // ✅ 错题本里加个喇叭，点击发音
-                    leading: IconButton(
-                      icon: const Icon(Icons.volume_up_rounded, color: Colors.orange),
-                      onPressed: () => GlobalData.speak(word.word),
-                    ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline, color: Colors.grey),
-                      onPressed: () => _removeMistake(word.id!),
-                    ),
+                    leading: IconButton(icon: const Icon(Icons.volume_up_rounded, color: Colors.orange), onPressed: () => GlobalData.speak(word.word)),
+                    trailing: IconButton(icon: const Icon(Icons.delete_outline, color: Colors.grey), onPressed: () => _removeMistake(word.id!)),
                     onTap: () {
-                      showDialog(
-                        context: context, 
-                        builder: (c) => AlertDialog(
-                          title: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(word.word),
-                              // 弹窗里也加个发音按钮
-                              IconButton(icon: const Icon(Icons.volume_up_rounded, color: Colors.blue), onPressed: () => GlobalData.speak(word.word)),
-                            ],
-                          ),
-                          content: SingleChildScrollView(child: Text(word.definition)),
-                          actions: [TextButton(onPressed: ()=>Navigator.pop(c), child: const Text("关闭"))],
-                        )
-                      );
+                      showDialog(context: context, builder: (c) => AlertDialog(title: Row(mainAxisSize: MainAxisSize.min, children: [Text(word.word), IconButton(icon: const Icon(Icons.volume_up_rounded, color: Colors.blue), onPressed: () => GlobalData.speak(word.word))]), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(word.definition), if(word.example.isNotEmpty) ...[const Divider(), Text(word.example, style: TextStyle(color: Colors.grey[600], fontStyle: FontStyle.italic))]])), actions: [TextButton(onPressed: ()=>Navigator.pop(c), child: const Text("关闭"))]));
                     },
                   ),
                 );
