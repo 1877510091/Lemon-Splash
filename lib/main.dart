@@ -260,8 +260,8 @@ class _HomePageState extends State<HomePage> {
                     builder: (context, count, _) {
                       return LemonGlassCard(
                         icon: Icons.water_drop,
-                        title: "今日收集",
-                        value: "$count 滴",
+                        title: "今日学习",
+                        value: "$count 个单词",
                         color: Colors.lime,
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const StatsPage())),
                       );
