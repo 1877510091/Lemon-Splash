@@ -21,8 +21,8 @@ class DatabaseHelper {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    // ✅ 升级数据库版本 v4 (触发新建表)
-    _database = await _initDB('lemon_words_v4.db'); 
+    // ✅ 升级版本号 v5 (触发新建表)
+    _database = await _initDB('lemon_words_v5.db'); 
     return _database!;
   }
 
@@ -33,7 +33,6 @@ class DatabaseHelper {
   }
 
   Future _createDB(Database db, int version) async {
-    // ✅ 增加 isMistake 字段
     await db.execute('''
     CREATE TABLE words (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,11 +48,29 @@ class DatabaseHelper {
     await db.execute('CREATE INDEX idx_bookName ON words(bookName)');
     await db.execute('CREATE INDEX idx_status ON words(status)'); 
     await db.execute('CREATE INDEX idx_nextReviewTime ON words(nextReviewTime)');
-    // ✅ 错题索引
     await db.execute('CREATE INDEX idx_isMistake ON words(isMistake)');
     
     await db.execute('CREATE TABLE study_logs (date TEXT PRIMARY KEY, count INTEGER DEFAULT 0)');
     await db.execute('CREATE TABLE study_progress (bookName TEXT PRIMARY KEY, currentGroup INTEGER DEFAULT 0, lastReviewTime TEXT)');
+    
+    // ✅ 新增：设置表，用于保存"上次打开的书"等全局配置
+    await db.execute('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
+  }
+
+  // ✅ 功能3：保存当前选的书
+  Future<void> setLastBook(String bookName) async {
+    final db = await instance.database;
+    await db.insert('settings', {'key': 'last_book', 'value': bookName}, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // ✅ 功能3：获取上次选的书
+  Future<String?> getLastBook() async {
+    final db = await instance.database;
+    final res = await db.query('settings', where: 'key = ?', whereArgs: ['last_book']);
+    if (res.isNotEmpty) {
+      return res.first['value'] as String;
+    }
+    return null;
   }
 
   Future<bool> importJsonData(String jsonFileName, String bookName, {bool isShuffle = false}) async {
@@ -89,6 +106,8 @@ class DatabaseHelper {
         await Future.delayed(const Duration(milliseconds: 1));
       }
       await saveStudyProgress(StudyProgress(bookName: bookName, currentGroup: 0));
+      // 导入成功后，自动设为当前书
+      await setLastBook(bookName); 
       debugPrint("✅ 导入成功！");
       return true; 
     } catch (e) {
@@ -99,7 +118,6 @@ class DatabaseHelper {
     }
   }
 
-  // ✅ 核心功能：初次学习 (支持标记错题)
   Future<void> markWordAsLearned(int wordId, {bool isMistake = false}) async {
     final db = await instance.database;
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now()); 
@@ -112,7 +130,7 @@ class DatabaseHelper {
           'status': 1, 
           'reviewStage': 1, 
           'nextReviewTime': nextReview.toIso8601String(),
-          'isMistake': isMistake ? 1 : 0 // ✅ 如果是“忘记”，加入错题本
+          'isMistake': isMistake ? 1 : 0 
         }, 
         where: 'id = ?', 
         whereArgs: [wordId]
@@ -122,27 +140,33 @@ class DatabaseHelper {
     });
   }
 
-  // ✅ 核心功能：获取所有错题
-  Future<List<Word>> getMistakeWords() async {
+  // ✅ 功能2：固定分组逻辑 (关键修改)
+  // 不再是"取前20个未学单词"，而是"取第 N 组的20个单词"
+  Future<List<Word>> getWordsByGroup(String bookName, int groupIndex, {int size = 20}) async {
     final db = await instance.database;
-    // 查找当前书本的错题，或者所有错题？这里暂时查所有错题，或者你可以加 bookName 过滤
+    // 使用 OFFSET 跳过前面的组，实现固定翻页
+    final offset = groupIndex * size;
+    
     final result = await db.query(
-      'words',
-      where: 'isMistake = 1',
-      orderBy: 'id DESC', // 新错的在前面
+      'words', 
+      where: 'bookName = ?', 
+      whereArgs: [bookName], 
+      orderBy: 'id ASC', // 必须按ID排序，保证顺序固定
+      limit: size,
+      offset: offset
     );
     return result.map((json) => Word.fromMap(json)).toList();
   }
 
-  // ✅ 核心功能：移除错题 (斩杀)
+  Future<List<Word>> getMistakeWords() async {
+    final db = await instance.database;
+    final result = await db.query('words', where: 'isMistake = 1', orderBy: 'id DESC');
+    return result.map((json) => Word.fromMap(json)).toList();
+  }
+
   Future<void> removeMistake(int wordId) async {
     final db = await instance.database;
-    await db.update(
-      'words',
-      {'isMistake': 0},
-      where: 'id = ?',
-      whereArgs: [wordId],
-    );
+    await db.update('words', {'isMistake': 0}, where: 'id = ?', whereArgs: [wordId]);
   }
 
   Future<void> processReview(int wordId, bool remembered, int currentStage) async {
@@ -168,7 +192,6 @@ class DatabaseHelper {
       {
         'reviewStage': newStage,
         'nextReviewTime': nextReviewDate.toIso8601String(),
-        // 如果复习时又忘了，自动加入错题本；如果记得，不自动移除(需手动斩杀)，或者你可以改成记得就移除
         'isMistake': remembered ? 0 : 1 
       },
       where: 'id = ?',
@@ -227,14 +250,11 @@ class DatabaseHelper {
     return Sqflite.firstIntValue(res) ?? 0;
   }
 
+  // 旧的获取未学方法保留兼容，但主要逻辑已切到 getWordsByGroup
   Future<List<Word>> getUnlearnedWords(String bookName, {int limit = 20}) async {
     final db = await instance.database;
     final result = await db.query('words', where: 'bookName = ? AND status = 0', whereArgs: [bookName], orderBy: 'id ASC', limit: limit);
     return result.map((json) => Word.fromMap(json)).toList();
-  }
-  
-  Future<List<Word>> getWordsByBook(String bookName) async {
-    return getUnlearnedWords(bookName);
   }
 
   Future<void> devUpdateStat(String date, int count) async {
